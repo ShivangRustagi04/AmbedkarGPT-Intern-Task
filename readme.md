@@ -27,8 +27,8 @@ The system loads Dr. B.R. Ambedkar’s speech, converts it into embeddings, retr
 
 ### 1. Clone the repository
 ```bash
-git clone 
-cd 
+git clone https://github.com/ShivangRustagi04/AmbedkarGPT-Intern-Task.git
+cd AmbedkarGPT-Intern-Task
 ```
 
 ### 2. Create & activate a virtual environment

@@ -7,6 +7,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_community.llms import Ollama
 from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
 
 # Config
 SPEECH_FILE = "speech.txt"
@@ -15,7 +16,7 @@ OLLAMA_MODEL = "mistral"  # change this if your Ollama model identifier differs
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHUNK_SIZE = 400
 CHUNK_OVERLAP = 50
-TOP_K = 4
+TOP_K = 3
 
 
 def load_text(path: str) -> str:
@@ -51,34 +52,53 @@ def build_or_load_vectorstore(text: str, persist_directory: str) -> Chroma:
     return vectordb
 
 
-def answer_question(question: str, vectordb: Chroma, llm: Ollama, top_k: int = TOP_K) -> str:
-    # Retrieve top-k relevant chunks
-    docs = vectordb.similarity_search(question, k=top_k)
-    if not docs:
-        return "I don't know — no relevant context found."
-
-    context = "\n\n".join([d.page_content for d in docs])
-
-    # Prompt instructing the LLM to *only* use the provided context
-    prompt = (
-        "You are given context from a short speech. Use ONLY the information in the context to answer the question. "
-        "If the answer is not present in the context, reply with: 'I don't know — the answer is not contained in the provided text.'\n\n"
-        f"CONTEXT:\n{context}\n\n"
-        f"QUESTION: {question}\n\n"
-        "Answer concisely:"
+def setup_retrieval_qa(vectordb: Chroma, llm: Ollama) -> RetrievalQA:
+    """Set up a RetrievalQA chain with custom prompt"""
+    
+    # Custom prompt template to ensure the model only uses provided context
+    custom_prompt = PromptTemplate(
+        template=(
+            "You are given context from a short speech. Use ONLY the information in the context to answer the question. "
+            "If the answer is not present in the context, reply with: 'I don't know — the answer is not contained in the provided text.'\n\n"
+            "Context:\n{context}\n\n"
+            "Question: {question}\n\n"
+            "Answer concisely:"
+        ),
+        input_variables=["context", "question"]
     )
+    
+    # Create RetrievalQA chain
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",  # "stuff" means put all relevant documents in the prompt
+        retriever=vectordb.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": TOP_K}  # Retrieve top K documents
+        ),
+        return_source_documents=True,
+        chain_type_kwargs={"prompt": custom_prompt}
+    )
+    
+    return qa_chain
 
-    # Call Ollama LLM
+
+def answer_question_retrieval_qa(question: str, qa_chain: RetrievalQA) -> str:
+    """Answer question using RetrievalQA chain"""
     try:
-        resp = llm(prompt)
-        # llm(...) usually returns a string for simple wrappers
-        return resp
+        result = qa_chain({"query": question})
+        answer = result["result"]
+        source_docs = result["source_documents"]
+        
+        # Optional: Show source information
+        print(f"\n[Retrieved {len(source_docs)} relevant chunks]")
+        
+        return answer
     except Exception as e:
         return f"LLM call failed: {e}"
 
 
 def main():
-    print("Simple RAG CLI over speech.txt — powered by LangChain + Chroma + HF embeddings + Ollama")
+    print("Simple RAG CLI over speech.txt — powered by LangChain + Chroma + HF embeddings + Ollama (RetrievalQA)")
 
     text = load_text(SPEECH_FILE)
 
@@ -87,6 +107,10 @@ def main():
     # Initialize Ollama LLM wrapper
     print(f"Connecting to Ollama model '{OLLAMA_MODEL}'... (ensure Ollama is running locally and model is present)")
     llm = Ollama(model=OLLAMA_MODEL)
+
+    # Set up RetrievalQA chain
+    print("Setting up RetrievalQA chain...")
+    qa_chain = setup_retrieval_qa(vectordb, llm)
 
     # CLI loop
     print("Ready. Ask questions about the speech (type 'exit' or 'quit' to stop).")
@@ -102,7 +126,7 @@ def main():
             print("Goodbye.")
             break
 
-        answer = answer_question(question, vectordb, llm)
+        answer = answer_question_retrieval_qa(question, qa_chain)
         print("\nAnswer:\n")
         print(answer)
 

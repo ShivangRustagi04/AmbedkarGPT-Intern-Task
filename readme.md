@@ -78,15 +78,11 @@ ollama run mistral
 python main.py
 ```
 
-Example:
-```
-Ask a question: What is the real enemy?
+Example for Reference:
 
-Answer:
-The belief in the shastras.
-```
 
 <img width="576" height="207" alt="image" src="https://github.com/user-attachments/assets/25ee47b0-f8c5-415f-a2c6-57d66aa5f32f" />
+
 
 
 To exit:
